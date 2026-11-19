@@ -1,0 +1,1127 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Muzeycha 3D</title>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #F6F1EA;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      touch-action: none;
+    }
+    #canvas-container {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+    #joystick-zone {
+      position: fixed;
+      left: 22px;
+      bottom: 30px;
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      background: rgba(246, 241, 234, 0.24);
+      border: 1.5px solid rgba(255, 255, 255, 0.45);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 20;
+      transition: opacity 0.25s ease;
+    }
+    #joystick-knob {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: rgba(255, 253, 249, 0.88);
+      box-shadow: 0 4px 14px rgba(31, 28, 24, 0.25);
+      transform: translate(0px, 0px);
+      pointer-events: none;
+    }
+    #hint-pill {
+      position: fixed;
+      bottom: 34px;
+      right: 18px;
+      max-width: 55vw;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: rgba(31, 28, 24, 0.62);
+      color: #FFFDF9;
+      font-size: 12px;
+      line-height: 1.35;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      z-index: 19;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+    .hidden {
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="canvas-container"></div>
+  <div id="joystick-zone" aria-label="Yurish boshqaruvi">
+    <div id="joystick-knob"></div>
+  </div>
+  <div id="hint-pill">Atrofga qarash uchun suring, rasmga bosing</div>
+
+  <script src="three.min.js"></script>
+  <script>
+    (function () {
+      const container = document.getElementById('canvas-container');
+      const joystickZone = document.getElementById('joystick-zone');
+      const joystickKnob = document.getElementById('joystick-knob');
+      const hintPill = document.getElementById('hint-pill');
+
+      const THEMES = {
+        CLASSIC_WHITE: {
+          bg: 0xECE5DC,
+          wall: 0xF7F3EC,
+          floorA: '#EAE1D5',
+          floorB: '#E2D7C8',
+          ceiling: 0xFAF7F2,
+          trim: 0xD8CFC2,
+          frame: 0xB08D57,
+          mat: 0xFCFBF8,
+          ambient: 0xFFF9F0,
+          ambientInt: 0.72,
+          spotColor: 0xFFF3DE,
+          spotInt: 1.25
+        },
+        WARM_WOOD: {
+          bg: 0x2B2017,
+          wall: 0x8B5E3C,
+          wallPattern: 'wood',
+          floorA: '#CBB195',
+          floorB: '#BFA181',
+          ceiling: 0xE6D8C7,
+          trim: 0x4E3422,
+          frame: 0x3A2517,
+          mat: 0xF9F4EC,
+          ambient: 0xFFEAD2,
+          ambientInt: 0.65,
+          spotColor: 0xFFDCA8,
+          spotInt: 1.35
+        },
+        MODERN_DARK: {
+          bg: 0x161514,
+          wall: 0x262422,
+          floorA: '#2D2B29',
+          floorB: '#272523',
+          ceiling: 0x1B1A18,
+          trim: 0x3A3632,
+          frame: 0xD1B88E,
+          mat: 0xF3EFE8,
+          ambient: 0xEDE8E0,
+          ambientInt: 0.45,
+          spotColor: 0xFFF2DB,
+          spotInt: 1.65
+        },
+        ROMANTIC: {
+          bg: 0xF5DDE1,
+          wall: 0xF8E7EA,
+          floorA: '#F3DFD6',
+          floorB: '#EDD2C7',
+          ceiling: 0xFCF2F0,
+          trim: 0xD4AF7A,
+          frame: 0xD4AF7A,
+          mat: 0xFFF9F6,
+          ambient: 0xFFE6DF,
+          ambientInt: 0.78,
+          spotColor: 0xFFE0C8,
+          spotInt: 1.32,
+          frameGlow: true,
+          romanticDecor: true,
+          parallaxDof: true
+        },
+        WEDDING: {
+          bg: 0xF6F2EB,
+          wall: 0xFCFBF8,
+          floorA: '#F5EFE5',
+          floorB: '#ECE2D2',
+          ceiling: 0xFFFFFF,
+          trim: 0xC9A25E,
+          frame: 0xC9A25E,
+          mat: 0xFFFFFF,
+          ambient: 0xFFFBF3,
+          ambientInt: 0.80,
+          spotColor: 0xFFF4DC,
+          spotInt: 1.35,
+          weddingDecor: true
+        }
+      };
+
+      const isLowPower = (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) ||
+                         (navigator.deviceMemory && navigator.deviceMemory <= 3);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: !isLowPower, powerPreference: 'high-performance' });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.outputEncoding = THREE.sRGBEncoding;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.05;
+      renderer.shadowMap.enabled = !isLowPower;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      container.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+      camera.rotation.order = 'YXZ';
+
+      let galleryGroup = new THREE.Group();
+      scene.add(galleryGroup);
+
+      let artworkMeshes = [];
+      let artworkData = [];
+      let interactiveGuestbookMesh = null;
+      let animatedParticles = [];
+      let candleFlames = [];
+      let activeParallaxDof = false;
+      let roomBounds = { minX: -4, maxX: 4, minZ: -4, maxZ: 4 };
+      let focusedIndex = -1;
+      let isTransitioning = false;
+      let camTargetPos = new THREE.Vector3(0, 1.65, 2.2);
+      let camTargetYaw = 0;
+      let camTargetPitch = 0;
+      let savedWalkState = { pos: new THREE.Vector3(0, 1.65, 2.2), yaw: 0, pitch: 0 };
+
+      let yaw = 0;
+      let pitch = 0;
+      const moveKeys = { w: false, a: false, s: false, d: false };
+      let joyVec = { x: 0, y: 0 };
+      let joyTouchId = null;
+      let lookTouchId = null;
+      let lookLast = { x: 0, y: 0 };
+      let lookMovedDist = 0;
+      let mouseDown = false;
+      let textureQueue = [];
+      let loadedTextureIndices = new Set();
+
+      const textureLoader = new THREE.TextureLoader();
+      textureLoader.setCrossOrigin('anonymous');
+
+      function createProceduralFloorTexture(colorA, colorB) {
+        const c = document.createElement('canvas');
+        c.width = 256; c.height = 256;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = colorA;
+        ctx.fillRect(0, 0, 256, 256);
+        ctx.fillStyle = colorB;
+        ctx.fillRect(0, 0, 128, 128);
+        ctx.fillRect(128, 128, 128, 128);
+        ctx.strokeStyle = 'rgba(0,0,0,0.04)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(0, 0, 128, 128);
+        ctx.strokeRect(128, 128, 128, 128);
+        const tex = new THREE.CanvasTexture(c);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.encoding = THREE.sRGBEncoding;
+        return tex;
+      }
+
+      function createWoodWallTexture() {
+        const c = document.createElement('canvas');
+        c.width = 256; c.height = 256;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#8C6240';
+        ctx.fillRect(0, 0, 256, 256);
+        for (let i = 0; i < 8; i++) {
+          ctx.fillStyle = i % 2 === 0 ? 'rgba(65,39,20,0.12)' : 'rgba(255,230,200,0.06)';
+          ctx.fillRect(i * 32, 0, 30, 256);
+          ctx.fillStyle = 'rgba(40,22,10,0.18)';
+          ctx.fillRect(i * 32 + 30, 0, 2, 256);
+        }
+        const tex = new THREE.CanvasTexture(c);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.encoding = THREE.sRGBEncoding;
+        return tex;
+      }
+
+      function createGlowTexture() {
+        const c = document.createElement('canvas');
+        c.width = 128; c.height = 128;
+        const ctx = c.getContext('2d');
+        const g = ctx.createRadialGradient(64, 64, 12, 64, 64, 64);
+        g.addColorStop(0, 'rgba(255, 214, 188, 0.72)');
+        g.addColorStop(0.55, 'rgba(244, 178, 192, 0.28)');
+        g.addColorStop(1, 'rgba(255, 220, 210, 0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, 128, 128);
+        const tex = new THREE.CanvasTexture(c);
+        tex.encoding = THREE.sRGBEncoding;
+        return tex;
+      }
+
+      function createPetalTexture() {
+        const c = document.createElement('canvas');
+        c.width = 64; c.height = 64;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#F7B7C5';
+        ctx.beginPath();
+        ctx.ellipse(32, 32, 20, 12, 0.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,240,245,0.5)';
+        ctx.beginPath();
+        ctx.ellipse(28, 29, 10, 5, 0.4, 0, Math.PI * 2);
+        ctx.fill();
+        const tex = new THREE.CanvasTexture(c);
+        tex.encoding = THREE.sRGBEncoding;
+        return tex;
+      }
+
+      function createHeartTexture() {
+        const c = document.createElement('canvas');
+        c.width = 64; c.height = 64;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#E88AA0';
+        ctx.beginPath();
+        ctx.moveTo(32, 50);
+        ctx.bezierCurveTo(10, 36, 10, 16, 22, 16);
+        ctx.bezierCurveTo(28, 16, 32, 22, 32, 25);
+        ctx.bezierCurveTo(32, 22, 36, 16, 42, 16);
+        ctx.bezierCurveTo(54, 16, 54, 36, 32, 50);
+        ctx.fill();
+        const tex = new THREE.CanvasTexture(c);
+        tex.encoding = THREE.sRGBEncoding;
+        return tex;
+      }
+
+      function createWeddingSignTexture(brideName, groomName, weddingDate) {
+        const c = document.createElement('canvas');
+        c.width = 1024; c.height = 512;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#FCF9F3';
+        ctx.fillRect(0, 0, 1024, 512);
+
+        // Gold double border
+        ctx.strokeStyle = '#C9A25E';
+        ctx.lineWidth = 8;
+        ctx.strokeRect(24, 24, 976, 464);
+        ctx.lineWidth = 2.5;
+        ctx.strokeRect(42, 42, 940, 428);
+
+        ctx.fillStyle = '#9C7A3C';
+        ctx.font = '600 28px Georgia, serif';
+        ctx.textAlign = 'center';
+        ctx.fillText("TO'Y GALEREYASI", 512, 118);
+
+        const namesText = (brideName && groomName)
+          ? `${brideName}  &  ${groomName}`
+          : (brideName || groomName || 'Baxtli Juftlik');
+        ctx.fillStyle = '#2B241D';
+        ctx.font = 'italic bold 72px Georgia, serif';
+        ctx.fillText(namesText, 512, 268);
+
+        if (weddingDate) {
+          ctx.fillStyle = '#8C5A3C';
+          ctx.font = '500 36px Georgia, serif';
+          ctx.fillText(weddingDate, 512, 362);
+        }
+
+        // Subtle gold ornament line
+        ctx.strokeStyle = '#C9A25E';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(350, 410);
+        ctx.lineTo(674, 410);
+        ctx.stroke();
+
+        const tex = new THREE.CanvasTexture(c);
+        tex.encoding = THREE.sRGBEncoding;
+        return tex;
+      }
+
+      function createGuestbookSignTexture() {
+        const c = document.createElement('canvas');
+        c.width = 768; c.height = 384;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#FAF5EC';
+        ctx.fillRect(0, 0, 768, 384);
+        ctx.strokeStyle = '#C9A25E';
+        ctx.lineWidth = 8;
+        ctx.strokeRect(18, 18, 732, 348);
+
+        ctx.fillStyle = '#2B241D';
+        ctx.font = 'bold 48px Georgia, serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Tabrik qoldirish', 384, 165);
+
+        ctx.fillStyle = '#8C5A3C';
+        ctx.font = '28px sans-serif';
+        ctx.fillText('Mehmonlar kitobini ochish uchun bosing', 384, 240);
+
+        const tex = new THREE.CanvasTexture(c);
+        tex.encoding = THREE.sRGBEncoding;
+        return tex;
+      }
+
+      function addRomanticCeilingDecor(roomW, roomD, roomH) {
+        // Hanging floral garlands across ceiling
+        const garlandColor = 0x7E9C77;
+        const blossomColors = [0xF4B6C2, 0xFCE0E6, 0xE6C79C];
+        const vineMat = new THREE.MeshStandardMaterial({ color: garlandColor, roughness: 0.8 });
+
+        const rows = [-roomD * 0.24, roomD * 0.24];
+        rows.forEach((zPos) => {
+          const steps = 10;
+          for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            const x = -roomW * 0.36 + t * (roomW * 0.72);
+            const sag = Math.sin(t * Math.PI) * 0.38;
+            const y = roomH - 0.14 - sag;
+
+            const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.11, 7, 7), vineMat);
+            leaf.position.set(x, y, zPos);
+            galleryGroup.add(leaf);
+
+            if (i % 2 === 0) {
+              const bColor = blossomColors[i % blossomColors.length];
+              const flower = new THREE.Mesh(
+                new THREE.SphereGeometry(0.085, 7, 7),
+                new THREE.MeshStandardMaterial({ color: bColor, roughness: 0.5 })
+              );
+              flower.position.set(x + 0.05, y - 0.06, zPos + 0.04);
+              galleryGroup.add(flower);
+            }
+          }
+        });
+
+        // Hanging warm chandelier candles in center
+        const candleOffsets = [
+          [-0.9, -0.5], [0.9, -0.5], [0, 0], [-0.9, 0.5], [0.9, 0.5]
+        ];
+        const waxMat = new THREE.MeshStandardMaterial({ color: 0xFFF8EE, roughness: 0.6 });
+        const flameMat = new THREE.MeshBasicMaterial({ color: 0xFFD27D });
+        const holderMat = new THREE.MeshStandardMaterial({ color: 0xC99D6B, metalness: 0.6, roughness: 0.3 });
+
+        candleOffsets.forEach(([cx, cz], idx) => {
+          const cordLen = idx === 2 ? 0.85 : 0.65;
+          const baseY = roomH - cordLen;
+
+          const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, cordLen, 6), holderMat);
+          cord.position.set(cx, roomH - cordLen / 2, cz);
+          galleryGroup.add(cord);
+
+          const candle = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.24, 10), waxMat);
+          candle.position.set(cx, baseY - 0.12, cz);
+          galleryGroup.add(candle);
+
+          const flame = new THREE.Mesh(new THREE.SphereGeometry(0.032, 8, 8), flameMat);
+          flame.scale.set(0.7, 1.4, 0.7);
+          flame.position.set(cx, baseY + 0.03, cz);
+          flame.userData = { baseY: baseY + 0.03, phase: idx * 1.3 };
+          galleryGroup.add(flame);
+          candleFlames.push(flame);
+        });
+
+        // Soft warm point light under central candles
+        const candleLight = new THREE.PointLight(0xFFD5A8, 0.75, 11, 1.4);
+        candleLight.position.set(0, roomH - 0.9, 0);
+        galleryGroup.add(candleLight);
+      }
+
+      function spawnParticles(mode, roomW, roomD, roomH) {
+        // Limit particle count on mobile, auto-reduce on low-power devices
+        const count = mode === 'ROMANTIC'
+          ? (isLowPower ? 34 : 95)
+          : (isLowPower ? 28 : 80);
+
+        if (mode === 'ROMANTIC') {
+          const petalTex = createPetalTexture();
+          const heartTex = createHeartTexture();
+          const petalMat = new THREE.MeshBasicMaterial({ map: petalTex, transparent: true, opacity: 0.86, side: THREE.DoubleSide, depthWrite: false });
+          const heartMat = new THREE.MeshBasicMaterial({ map: heartTex, transparent: true, opacity: 0.82, side: THREE.DoubleSide, depthWrite: false });
+          const planeGeo = new THREE.PlaneGeometry(0.14, 0.14);
+
+          for (let i = 0; i < count; i++) {
+            const isHeart = i % 3 === 0;
+            const p = new THREE.Mesh(planeGeo, isHeart ? heartMat : petalMat);
+            p.position.set(
+              (Math.random() - 0.5) * (roomW - 1.2),
+              0.4 + Math.random() * (roomH - 0.9),
+              (Math.random() - 0.5) * (roomD - 1.2)
+            );
+            p.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+            p.userData = {
+              mode: 'ROMANTIC',
+              speedY: isHeart ? (0.12 + Math.random() * 0.12) : -(0.14 + Math.random() * 0.16),
+              swayAmp: 0.25 + Math.random() * 0.35,
+              phase: Math.random() * Math.PI * 2,
+              spin: (Math.random() - 0.5) * 1.2,
+              roomW, roomD, roomH
+            };
+            galleryGroup.add(p);
+            animatedParticles.push(p);
+          }
+        } else if (mode === 'WEDDING') {
+          const colors = [0xD4AF37, 0xFFFDF7, 0xF3DFC8, 0xE6C79C];
+          const mats = colors.map(c => new THREE.MeshBasicMaterial({ color: c, side: THREE.DoubleSide, transparent: true, opacity: 0.88 }));
+          const geo = new THREE.PlaneGeometry(0.08, 0.12);
+
+          for (let i = 0; i < count; i++) {
+            const p = new THREE.Mesh(geo, mats[i % mats.length]);
+            p.position.set(
+              (Math.random() - 0.5) * (roomW - 1.2),
+              0.5 + Math.random() * (roomH - 0.8),
+              (Math.random() - 0.5) * (roomD - 1.2)
+            );
+            p.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+            p.userData = {
+              mode: 'WEDDING',
+              speedY: -(0.18 + Math.random() * 0.22),
+              swayAmp: 0.2 + Math.random() * 0.3,
+              phase: Math.random() * Math.PI * 2,
+              spin: (Math.random() - 0.5) * 2.1,
+              roomW, roomD, roomH
+            };
+            galleryGroup.add(p);
+            animatedParticles.push(p);
+          }
+        }
+      }
+
+      function clearGallery() {
+        while (galleryGroup.children.length > 0) {
+          const obj = galleryGroup.children[0];
+          galleryGroup.remove(obj);
+        }
+        artworkMeshes = [];
+        artworkData = [];
+        interactiveGuestbookMesh = null;
+        animatedParticles = [];
+        candleFlames = [];
+        activeParallaxDof = false;
+        textureQueue = [];
+        loadedTextureIndices.clear();
+        focusedIndex = -1;
+        isTransitioning = false;
+      }
+
+      function buildMuseum(payload) {
+        clearGallery();
+        if (payload.hintText) {
+          hintPill.textContent = payload.hintText;
+        }
+        const styleKey = payload.roomStyle || 'CLASSIC_WHITE';
+        const theme = THEMES[styleKey] || THEMES.CLASSIC_WHITE;
+        scene.background = new THREE.Color(theme.bg);
+        activeParallaxDof = !!theme.parallaxDof;
+        scene.fog = theme.parallaxDof
+          ? new THREE.FogExp2(theme.bg, 0.045)
+          : new THREE.Fog(theme.bg, 12, 34);
+
+        const photos = Array.isArray(payload.photos) ? payload.photos : [];
+        const count = Math.max(photos.length, 3);
+
+        const sideSlots = Math.ceil(count / 3);
+        const spacing = 3.1;
+        const roomW = Math.max(8.5, Math.min(18, sideSlots * spacing + 2.4));
+        const roomD = Math.max(9.0, Math.min(20, Math.ceil(count / 2.2) * spacing + 2.6));
+        const roomH = 4.2;
+
+        roomBounds = {
+          minX: -roomW / 2 + 0.9,
+          maxX: roomW / 2 - 0.9,
+          minZ: -roomD / 2 + 0.9,
+          maxZ: roomD / 2 - 0.9
+        };
+
+        // Lights
+        const hemi = new THREE.HemisphereLight(theme.ambient, theme.bg, theme.ambientInt);
+        galleryGroup.add(hemi);
+        const dirLight = new THREE.DirectionalLight(theme.ambient, 0.35);
+        dirLight.position.set(2, roomH - 0.5, 2);
+        galleryGroup.add(dirLight);
+
+        // Floor
+        const floorTex = createProceduralFloorTexture(theme.floorA, theme.floorB);
+        floorTex.repeat.set(Math.round(roomW / 1.5), Math.round(roomD / 1.5));
+        const floorMat = new THREE.MeshStandardMaterial({
+          map: floorTex,
+          roughness: 0.72,
+          metalness: 0.05
+        });
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(roomW, roomD), floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = !isLowPower;
+        galleryGroup.add(floor);
+
+        // Ceiling
+        const ceilMat = new THREE.MeshStandardMaterial({ color: theme.ceiling, roughness: 0.92 });
+        const ceil = new THREE.Mesh(new THREE.PlaneGeometry(roomW, roomD), ceilMat);
+        ceil.rotation.x = Math.PI / 2;
+        ceil.position.y = roomH;
+        galleryGroup.add(ceil);
+
+        const skyMat = new THREE.MeshBasicMaterial({ color: theme.ambient });
+        const skylight = new THREE.Mesh(new THREE.PlaneGeometry(roomW * 0.48, roomD * 0.48), skyMat);
+        skylight.rotation.x = Math.PI / 2;
+        skylight.position.y = roomH - 0.02;
+        galleryGroup.add(skylight);
+
+        // Walls
+        const wallMatOpts = { color: theme.wall, roughness: 0.85, metalness: 0.02 };
+        if (theme.wallPattern === 'wood') {
+          const wt = createWoodWallTexture();
+          wt.repeat.set(4, 1);
+          wallMatOpts.map = wt;
+          wallMatOpts.color = 0xFFFFFF;
+        }
+        const wallMat = new THREE.MeshStandardMaterial(wallMatOpts);
+        const trimMat = new THREE.MeshStandardMaterial({ color: theme.trim, roughness: 0.65 });
+
+        function addWall(w, h, x, z, rotY) {
+          const wall = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat);
+          wall.position.set(x, h / 2, z);
+          wall.rotation.y = rotY;
+          wall.receiveShadow = !isLowPower;
+          galleryGroup.add(wall);
+
+          const baseboard = new THREE.Mesh(new THREE.BoxGeometry(w, 0.16, 0.06), trimMat);
+          baseboard.position.set(x, 0.08, z);
+          baseboard.rotation.y = rotY;
+          galleryGroup.add(baseboard);
+        }
+
+        addWall(roomW, roomH, 0, -roomD / 2, 0);
+        addWall(roomW, roomH, 0, roomD / 2, Math.PI);
+        addWall(roomD, roomH, -roomW / 2, 0, Math.PI / 2);
+        addWall(roomD, roomH, roomW / 2, 0, -Math.PI / 2);
+
+        // Style-specific architectural details & particles
+        if (theme.romanticDecor) {
+          addRomanticCeilingDecor(roomW, roomD, roomH);
+          spawnParticles('ROMANTIC', roomW, roomD, roomH);
+        }
+
+        if (theme.weddingDecor) {
+          // Entrance 3D Wedding Plaque (North center or pedestal near entrance)
+          const signTex = createWeddingSignTexture(
+            payload.brideName || '',
+            payload.groomName || '',
+            payload.weddingDate || ''
+          );
+          const plaqueGroup = new THREE.Group();
+          plaqueGroup.position.set(0, 1.85, roomD / 2 - 1.35);
+          plaqueGroup.rotation.y = Math.PI; // Faces visitor looking toward entrance or spawn
+
+          // Actually place plaque near North entrance focal arch facing camera at spawn!
+          plaqueGroup.position.set(0, 2.95, -roomD / 2 + 0.12);
+          plaqueGroup.rotation.y = 0;
+
+          const signFrame = new THREE.Mesh(
+            new THREE.BoxGeometry(2.65, 1.25, 0.08),
+            new THREE.MeshStandardMaterial({ color: 0xC9A25E, metalness: 0.55, roughness: 0.3 })
+          );
+          plaqueGroup.add(signFrame);
+
+          const signFace = new THREE.Mesh(
+            new THREE.PlaneGeometry(2.5, 1.12),
+            new THREE.MeshBasicMaterial({ map: signTex })
+          );
+          signFace.position.z = 0.045;
+          plaqueGroup.add(signFace);
+          galleryGroup.add(plaqueGroup);
+
+          // Guestbook lectern on South wall
+          const gbTex = createGuestbookSignTexture();
+          const gbGroup = new THREE.Group();
+          gbGroup.position.set(0, 1.45, roomD / 2 - 0.18);
+          gbGroup.rotation.y = Math.PI;
+          const gbFrame = new THREE.Mesh(
+            new THREE.BoxGeometry(1.75, 0.92, 0.08),
+            new THREE.MeshStandardMaterial({ color: 0xC9A25E, metalness: 0.5, roughness: 0.35 })
+          );
+          gbGroup.add(gbFrame);
+          const gbMesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(1.62, 0.8),
+            new THREE.MeshBasicMaterial({ map: gbTex })
+          );
+          gbMesh.position.z = 0.046;
+          gbGroup.add(gbMesh);
+          galleryGroup.add(gbGroup);
+          interactiveGuestbookMesh = gbMesh;
+
+          spawnParticles('WEDDING', roomW, roomD, roomH);
+        }
+
+        // Distribute paintings across walls
+        const wallDefs = [
+          { axis: 'z', fixed: -roomD / 2 + 0.05, span: roomW - 1.6, rotY: 0, normal: new THREE.Vector3(0, 0, 1) },
+          { axis: 'x', fixed: -roomW / 2 + 0.05, span: roomD - 1.6, rotY: Math.PI / 2, normal: new THREE.Vector3(1, 0, 0) },
+          { axis: 'x', fixed: roomW / 2 - 0.05, span: roomD - 1.6, rotY: -Math.PI / 2, normal: new THREE.Vector3(-1, 0, 0) },
+          { axis: 'z', fixed: roomD / 2 - 0.05, span: roomW - 1.6, rotY: Math.PI, normal: new THREE.Vector3(0, 0, -1) }
+        ];
+
+        // If wedding mode, keep South wall center reserved for guestbook by prioritizing N/E/W first
+        const wallCountLimit = theme.weddingDecor ? 3 : 4;
+        const perWall = [0, 0, 0, 0];
+        for (let i = 0; i < photos.length; i++) {
+          perWall[i % wallCountLimit]++;
+        }
+
+        const wallSlots = [[], [], [], []];
+        for (let wIdx = 0; wIdx < 4; wIdx++) {
+          const n = perWall[wIdx];
+          if (n === 0) continue;
+          const def = wallDefs[wIdx];
+          const step = def.span / n;
+          for (let j = 0; j < n; j++) {
+            const offset = -def.span / 2 + step * (j + 0.5);
+            const yHeight = (theme.weddingDecor && wIdx === 0) ? 1.48 : 1.72;
+            const pos = def.axis === 'z'
+              ? new THREE.Vector3(offset, yHeight, def.fixed)
+              : new THREE.Vector3(def.fixed, yHeight, offset);
+            wallSlots[wIdx].push({ pos, rotY: def.rotY, normal: def.normal });
+          }
+        }
+
+        const orderedSlots = [...wallSlots[0], ...wallSlots[2], ...wallSlots[3], ...wallSlots[1]];
+        const frameMat = new THREE.MeshStandardMaterial({ color: theme.frame, roughness: 0.35, metalness: 0.45 });
+        const matBoardMat = new THREE.MeshStandardMaterial({ color: theme.mat, roughness: 0.9 });
+        const glowTex = theme.frameGlow ? createGlowTexture() : null;
+
+        photos.forEach((photo, idx) => {
+          const slot = orderedSlots[idx % orderedSlots.length];
+          const aspect = (photo.width && photo.height && photo.height > 0)
+            ? Math.max(0.55, Math.min(1.85, photo.width / photo.height))
+            : 1.33;
+
+          const baseH = aspect >= 1 ? 1.22 : 1.45;
+          const artH = baseH;
+          const artW = baseH * aspect;
+
+          const group = new THREE.Group();
+          group.position.copy(slot.pos);
+          group.rotation.y = slot.rotY;
+
+          if (glowTex) {
+            const glowPlane = new THREE.Mesh(
+              new THREE.PlaneGeometry(artW + 0.72, artH + 0.72),
+              new THREE.MeshBasicMaterial({
+                map: glowTex,
+                transparent: true,
+                opacity: 0.75,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+              })
+            );
+            glowPlane.position.z = -0.01;
+            group.add(glowPlane);
+          }
+
+          const outerFrame = new THREE.Mesh(
+            new THREE.BoxGeometry(artW + 0.24, artH + 0.24, 0.07),
+            frameMat
+          );
+          outerFrame.castShadow = !isLowPower;
+          group.add(outerFrame);
+
+          const matBoard = new THREE.Mesh(
+            new THREE.BoxGeometry(artW + 0.12, artH + 0.12, 0.08),
+            matBoardMat
+          );
+          group.add(matBoard);
+
+          const artMat = new THREE.MeshStandardMaterial({
+            color: 0xDDD4C8,
+            roughness: 0.55,
+            metalness: 0.04
+          });
+          const artMesh = new THREE.Mesh(new THREE.PlaneGeometry(artW, artH), artMat);
+          artMesh.position.z = 0.046;
+          artMesh.userData = { artworkIndex: idx };
+          group.add(artMesh);
+
+          const spot = new THREE.SpotLight(theme.spotColor, theme.spotInt, 7.5, Math.PI / 4.2, 0.48, 1.3);
+          const spotOffset = slot.normal.clone().multiplyScalar(1.35);
+          spot.position.set(
+            slot.pos.x + spotOffset.x,
+            roomH - 0.25,
+            slot.pos.z + spotOffset.z
+          );
+          spot.target = artMesh;
+          galleryGroup.add(spot);
+          galleryGroup.add(group);
+
+          artworkMeshes.push(artMesh);
+          artworkData.push({
+            photo,
+            group,
+            artMesh,
+            worldPos: slot.pos.clone(),
+            normal: slot.normal.clone(),
+            artW,
+            artH
+          });
+
+          textureQueue.push(idx);
+        });
+
+        camera.position.set(0, 1.65, Math.min(2.8, roomD / 2 - 1.5));
+        yaw = 0;
+        pitch = 0;
+        camera.rotation.set(pitch, yaw, 0, 'YXZ');
+
+        processLazyTextures();
+      }
+
+      function processLazyTextures() {
+        if (textureQueue.length === 0) return;
+        textureQueue.sort((a, b) => {
+          const da = artworkData[a].worldPos.distanceToSquared(camera.position);
+          const db = artworkData[b].worldPos.distanceToSquared(camera.position);
+          return da - db;
+        });
+
+        const batch = textureQueue.splice(0, 3);
+        batch.forEach((idx) => {
+          if (loadedTextureIndices.has(idx)) return;
+          loadedTextureIndices.add(idx);
+          const item = artworkData[idx];
+          if (!item || !item.photo || !item.photo.url) return;
+          textureLoader.load(
+            item.photo.url,
+            (tex) => {
+              tex.encoding = THREE.sRGBEncoding;
+              tex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+              item.artMesh.material.map = tex;
+              item.artMesh.material.color.setHex(0xFFFFFF);
+              item.artMesh.material.needsUpdate = true;
+            },
+            undefined,
+            () => {}
+          );
+        });
+
+        if (textureQueue.length > 0) {
+          setTimeout(processLazyTextures, 140);
+        }
+      }
+
+      function focusArtwork(idx) {
+        if (idx < 0 || idx >= artworkData.length) return;
+        if (focusedIndex === idx) {
+          exitFocus();
+          return;
+        }
+        if (focusedIndex === -1) {
+          savedWalkState = { pos: camera.position.clone(), yaw, pitch };
+        }
+        focusedIndex = idx;
+        isTransitioning = true;
+
+        const item = artworkData[idx];
+        const dist = Math.max(1.45, Math.max(item.artW, item.artH) * 1.18);
+        camTargetPos.copy(item.worldPos).addScaledVector(item.normal, dist);
+        camTargetPos.y = item.worldPos.y;
+
+        const lookVec = item.worldPos.clone().sub(camTargetPos).normalize();
+        camTargetYaw = Math.atan2(-lookVec.x, -lookVec.z);
+        camTargetPitch = Math.asin(Math.max(-0.99, Math.min(0.99, lookVec.y)));
+
+        joystickZone.classList.add('hidden');
+        hintPill.classList.add('hidden');
+
+        if (window.AndroidBridge && window.AndroidBridge.onArtworkSelected) {
+          window.AndroidBridge.onArtworkSelected(idx);
+        }
+      }
+
+      function exitFocus() {
+        if (focusedIndex === -1) return;
+        focusedIndex = -1;
+        isTransitioning = true;
+        camTargetPos.copy(savedWalkState.pos);
+        camTargetYaw = savedWalkState.yaw;
+        camTargetPitch = savedWalkState.pitch;
+
+        joystickZone.classList.remove('hidden');
+        hintPill.classList.remove('hidden');
+
+        if (window.AndroidBridge && window.AndroidBridge.onArtworkClosed) {
+          window.AndroidBridge.onArtworkClosed();
+        }
+      }
+
+      window.exitFocusMode = exitFocus;
+      window.setShadowsEnabled = function (enabled) {
+        renderer.shadowMap.enabled = !!enabled;
+      };
+      window.loadMuseum = function (jsonStr) {
+        try {
+          const data = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+          buildMuseum(data);
+        } catch (e) {
+          console.error('Failed to load museum JSON', e);
+        }
+      };
+
+      const raycaster = new THREE.Raycaster();
+      const pointerNdc = new THREE.Vector2();
+      function tryPickArtwork(clientX, clientY) {
+        pointerNdc.x = (clientX / window.innerWidth) * 2 - 1;
+        pointerNdc.y = -(clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(pointerNdc, camera);
+
+        if (interactiveGuestbookMesh) {
+          const gbHits = raycaster.intersectObject(interactiveGuestbookMesh, false);
+          if (gbHits.length > 0 && window.AndroidBridge && window.AndroidBridge.onGuestbookOpened) {
+            window.AndroidBridge.onGuestbookOpened();
+            return;
+          }
+        }
+
+        const hits = raycaster.intersectObjects(artworkMeshes, false);
+        if (hits.length > 0) {
+          const idx = hits[0].object.userData.artworkIndex;
+          focusArtwork(idx);
+        } else if (focusedIndex !== -1) {
+          exitFocus();
+        }
+      }
+
+      const maxJoyRadius = 38;
+      function updateJoystick(clientX, clientY) {
+        const rect = joystickZone.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        let dx = clientX - cx;
+        let dy = clientY - cy;
+        const dist = Math.hypot(dx, dy);
+        if (dist > maxJoyRadius) {
+          dx = (dx / dist) * maxJoyRadius;
+          dy = (dy / dist) * maxJoyRadius;
+        }
+        joystickKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+        joyVec.x = dx / maxJoyRadius;
+        joyVec.y = dy / maxJoyRadius;
+      }
+
+      joystickZone.addEventListener('touchstart', (e) => {
+        e.stopPropagation();
+        if (joyTouchId === null && e.changedTouches.length > 0) {
+          const t = e.changedTouches[0];
+          joyTouchId = t.identifier;
+          updateJoystick(t.clientX, t.clientY);
+        }
+      }, { passive: false });
+
+      joystickZone.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        for (const t of e.changedTouches) {
+          if (t.identifier === joyTouchId) {
+            updateJoystick(t.clientX, t.clientY);
+          }
+        }
+      }, { passive: false });
+
+      function resetJoystick(e) {
+        for (const t of e.changedTouches) {
+          if (t.identifier === joyTouchId) {
+            joyTouchId = null;
+            joyVec = { x: 0, y: 0 };
+            joystickKnob.style.transform = 'translate(0px, 0px)';
+          }
+        }
+      }
+      joystickZone.addEventListener('touchend', resetJoystick);
+      joystickZone.addEventListener('touchcancel', resetJoystick);
+
+      const canvasEl = renderer.domElement;
+      canvasEl.addEventListener('touchstart', (e) => {
+        if (lookTouchId === null && e.changedTouches.length > 0) {
+          const t = e.changedTouches[0];
+          lookTouchId = t.identifier;
+          lookLast = { x: t.clientX, y: t.clientY };
+          lookMovedDist = 0;
+        }
+      }, { passive: true });
+
+      canvasEl.addEventListener('touchmove', (e) => {
+        for (const t of e.changedTouches) {
+          if (t.identifier === lookTouchId) {
+            const dx = t.clientX - lookLast.x;
+            const dy = t.clientY - lookLast.y;
+            lookMovedDist += Math.hypot(dx, dy);
+            if (focusedIndex === -1 && !isTransitioning) {
+              yaw -= dx * 0.0042;
+              pitch = Math.max(-1.05, Math.min(1.05, pitch - dy * 0.0038));
+            }
+            lookLast = { x: t.clientX, y: t.clientY };
+          }
+        }
+      }, { passive: true });
+
+      canvasEl.addEventListener('touchend', (e) => {
+        for (const t of e.changedTouches) {
+          if (t.identifier === lookTouchId) {
+            if (lookMovedDist < 12) {
+              tryPickArtwork(t.clientX, t.clientY);
+            }
+            lookTouchId = null;
+          }
+        }
+      });
+
+      canvasEl.addEventListener('mousedown', (e) => {
+        mouseDown = true;
+        lookLast = { x: e.clientX, y: e.clientY };
+        lookMovedDist = 0;
+      });
+      window.addEventListener('mousemove', (e) => {
+        if (!mouseDown) return;
+        const dx = e.clientX - lookLast.x;
+        const dy = e.clientY - lookLast.y;
+        lookMovedDist += Math.hypot(dx, dy);
+        if (focusedIndex === -1 && !isTransitioning) {
+          yaw -= dx * 0.0035;
+          pitch = Math.max(-1.05, Math.min(1.05, pitch - dy * 0.003));
+        }
+        lookLast = { x: e.clientX, y: e.clientY };
+      });
+      window.addEventListener('mouseup', (e) => {
+        if (mouseDown) {
+          if (lookMovedDist < 8) {
+            tryPickArtwork(e.clientX, e.clientY);
+          }
+          mouseDown = false;
+        }
+      });
+
+      window.addEventListener('keydown', (e) => {
+        const k = e.key.toLowerCase();
+        if (k === 'w' || k === 'arrowup') moveKeys.w = true;
+        if (k === 's' || k === 'arrowdown') moveKeys.s = true;
+        if (k === 'a' || k === 'arrowleft') moveKeys.a = true;
+        if (k === 'd' || k === 'arrowright') moveKeys.d = true;
+        if (k === 'escape' && focusedIndex !== -1) exitFocus();
+      });
+      window.addEventListener('keyup', (e) => {
+        const k = e.key.toLowerCase();
+        if (k === 'w' || k === 'arrowup') moveKeys.w = false;
+        if (k === 's' || k === 'arrowdown') moveKeys.s = false;
+        if (k === 'a' || k === 'arrowleft') moveKeys.a = false;
+        if (k === 'd' || k === 'arrowright') moveKeys.d = false;
+      });
+
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      function lerpAngle(a, b, t) {
+        let diff = ((b - a + Math.PI) % (2 * Math.PI)) - Math.PI;
+        if (diff < -Math.PI) diff += 2 * Math.PI;
+        return a + diff * t;
+      }
+
+      const clock = new THREE.Clock();
+      let elapsed = 0;
+
+      function animate() {
+        requestAnimationFrame(animate);
+        const dt = Math.min(clock.getDelta(), 0.05);
+        elapsed += dt;
+
+        // Animate particles (petals, hearts, confetti)
+        for (let i = 0; i < animatedParticles.length; i++) {
+          const p = animatedParticles[i];
+          const u = p.userData;
+          p.position.y += u.speedY * dt;
+          p.position.x += Math.sin(elapsed * 1.1 + u.phase) * u.swayAmp * dt;
+          p.rotation.y += u.spin * dt;
+          p.rotation.z += u.spin * 0.5 * dt;
+
+          if (p.position.y < 0.25) {
+            p.position.y = u.roomH - 0.35;
+          } else if (p.position.y > u.roomH - 0.25) {
+            p.position.y = 0.35;
+          }
+        }
+
+        // Subtle candle flame flicker
+        for (let i = 0; i < candleFlames.length; i++) {
+          const f = candleFlames[i];
+          const s = 1 + Math.sin(elapsed * 7 + f.userData.phase) * 0.14;
+          f.scale.set(0.7 * s, 1.4 * s, 0.7 * s);
+        }
+
+        if (isTransitioning) {
+          const factor = 1 - Math.exp(-7 * dt);
+          camera.position.lerp(camTargetPos, factor);
+          yaw = lerpAngle(yaw, camTargetYaw, factor);
+          pitch += (camTargetPitch - pitch) * factor;
+          camera.rotation.set(pitch, yaw, 0, 'YXZ');
+
+          if (camera.position.distanceTo(camTargetPos) < 0.025 && Math.abs(pitch - camTargetPitch) < 0.01) {
+            camera.position.copy(camTargetPos);
+            yaw = camTargetYaw;
+            pitch = camTargetPitch;
+            isTransitioning = false;
+          }
+        } else if (focusedIndex === -1) {
+          camera.rotation.set(pitch, yaw, 0, 'YXZ');
+          const speed = 3.2 * dt;
+          let forward = -joyVec.y;
+          let strafe = joyVec.x;
+          if (moveKeys.w) forward += 1;
+          if (moveKeys.s) forward -= 1;
+          if (moveKeys.d) strafe += 1;
+          if (moveKeys.a) strafe -= 1;
+
+          if (Math.abs(forward) > 0.02 || Math.abs(strafe) > 0.02) {
+            const sinY = Math.sin(yaw);
+            const cosY = Math.cos(yaw);
+            const dx = (-sinY * forward + cosY * strafe) * speed;
+            const dz = (-cosY * forward - sinY * strafe) * speed;
+            camera.position.x = Math.max(roomBounds.minX, Math.min(roomBounds.maxX, camera.position.x + dx));
+            camera.position.z = Math.max(roomBounds.minZ, Math.min(roomBounds.maxZ, camera.position.z + dz));
+          }
+
+          if (activeParallaxDof && !isLowPower) {
+            // Subtle breathing parallax + gentle FOV depth shift while moving
+            const moving = Math.abs(forward) > 0.05 || Math.abs(strafe) > 0.05;
+            camera.position.y = 1.65 + Math.sin(elapsed * (moving ? 5.2 : 1.4)) * (moving ? 0.022 : 0.008);
+            const targetFov = moving ? 62 : 59;
+            if (Math.abs(camera.fov - targetFov) > 0.05) {
+              camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-4 * dt));
+              camera.updateProjectionMatrix();
+            }
+          }
+        } else if (activeParallaxDof && !isLowPower) {
+          // Subtle DOF-feel tightening FOV on focused artwork
+          if (Math.abs(camera.fov - 52) > 0.05) {
+            camera.fov += (52 - camera.fov) * (1 - Math.exp(-5 * dt));
+            camera.updateProjectionMatrix();
+          }
+        }
+
+        renderer.render(scene, camera);
+      }
+
+      animate();
+      if (window.AndroidBridge && window.AndroidBridge.onViewerReady) {
+        window.AndroidBridge.onViewerReady();
+      }
+    })();
+  </script>
+</body>
+</html>
